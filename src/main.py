@@ -1,100 +1,114 @@
-from fastapi import FastAPI, Query
-import requests
 import os
-from dotenv import load_dotenv
-from sentence_transformers import SentenceTransformer, util
+import requests
+import numpy as np
+from fastapi import FastAPI, Query
 from openai import OpenAI
+from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
-client = OpenAI(api_key=OPENAI_API_KEY)
 
 app = FastAPI()
 
-# Embedding model
-model = SentenceTransformer("all-MiniLM-L6-v2")
-
-MESSAGES_API = "https://november7-730026606190.europe-west1.run.app/messages"
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 
-def fetch_all_messages(limit=2000):
-    """Fetch dataset in batches using skip/limit pagination."""
-    messages = []
+# ---- EMBEDDING HELPER ----
+def embed_texts(texts):
+    """Generate embeddings using OpenAI embedding model."""
+    res = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=texts
+    )
+    return [item.embedding for item in res.data]
+
+
+# ---- COSINE SIMILARITY ----
+def cos_sim(a, b):
+    a = np.array(a)
+    b = np.array(b)
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+
+
+# ---- FETCH MESSAGES ----
+def fetch_messages(total_limit=400):
+    """Fetch messages from the API using pagination."""
+    url = "https://november7-730026606190.europe-west1.run.app/messages"
+    all_msgs = []
     skip = 0
+    limit = 100
 
-    while True:
-        resp = requests.get(MESSAGES_API, params={"skip": skip, "limit": 200})
+    while len(all_msgs) < total_limit:
+        resp = requests.get(url, params={"skip": skip, "limit": limit})
+        if resp.status_code != 200:
+            break
+
         data = resp.json()
-
-        batch = data.get("items", [])
-        if not batch:
+        items = data.get("items", [])
+        if not items:
             break
 
-        messages.extend(batch)
-        skip += 200
+        all_msgs.extend(items)
+        skip += limit
 
-        if skip >= limit:
-            break
-
-    return messages
+    return all_msgs[:total_limit]
 
 
+# ---- MAIN ENDPOINT ----
 @app.get("/ask")
 def ask(question: str = Query(...)):
-    # Step 1: Fetch messages
-    messages = fetch_all_messages()
+    # Fetch database messages
+    messages = fetch_messages()
+
+    if not messages:
+        return {"answer": "Could not fetch messages."}
 
     docs = [msg["message"] for msg in messages]
-    names = [msg["user_name"] for msg in messages]
+    users = [msg["user_name"] for msg in messages]
 
-    # Step 2: Semantic retrieval (top 5)
-    q_emb = model.encode(question, convert_to_tensor=True)
-    d_embs = model.encode(docs, convert_to_tensor=True)
+    # Embed question + docs using OpenAI
+    q_emb = embed_texts([question])[0]
+    d_embs = embed_texts(docs)
 
-    scores = util.pytorch_cos_sim(q_emb, d_embs)[0]
-    top_k = scores.topk(5)
+    # Compute similarity for each message
+    scores = [cos_sim(q_emb, d) for d in d_embs]
+    best_idx = int(np.argmax(scores))
 
-    retrieved = []
-    for idx in top_k.indices:
-        idx = int(idx)
-        retrieved.append({
-            "user": names[idx],
-            "message": docs[idx]
-        })
+    top_matches = sorted(
+        list(zip(scores, docs, users)),
+        key=lambda x: x[0],
+        reverse=True
+    )[:5]
 
-    # Step 3: LLM summarization
-    prompt = f"""
-You are an assistant answering a question using ONLY the retrieved messages.
-If the information is not present, reply: "I could not find that information."
+    # Build a retrieval summary for GPT
+    context = "\n".join([f"- {u}: {m}" for _, m, u in top_matches])
 
-Question: {question}
-
-Messages:
-{retrieved}
-
-Provide a short, factual answer.
-"""
-
+    # Ask GPT to answer using only retrieved messages
     try:
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=150
+            messages=[
+                {"role": "system", "content": "Answer using ONLY the information in the retrieved messages."},
+                {"role": "user", "content": f"Question: {question}\n\nRetrieved messages:\n{context}"}
+            ]
         )
 
-        # FIXED: correct way to access message
         final_answer = completion.choices[0].message.content
+
+        return {
+            "answer": final_answer,
+            "retrieved_messages": [
+                {"user": u, "message": m} for _, m, u in top_matches
+            ]
+        }
 
     except Exception as e:
         return {
             "answer": "OpenAI error occurred",
             "error": str(e),
-            "retrieved_messages": retrieved
+            "retrieved_messages": [
+                {"user": u, "message": m} for _, m, u in top_matches
+            ]
         }
-
-    return {"answer": final_answer}
 
 
 

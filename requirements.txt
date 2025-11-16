@@ -1,8 +1,9 @@
 fastapi
 uvicorn
-sentence-transformers
 requests
 python-dotenv
 openai
+numpy
+
 
 
