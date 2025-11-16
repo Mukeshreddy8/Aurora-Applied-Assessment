@@ -1,7 +1,8 @@
 fastapi
 uvicorn
-requests
 sentence-transformers
-torch
-openai>=1.0.0
+requests
+python-dotenv
+openai
+
 
