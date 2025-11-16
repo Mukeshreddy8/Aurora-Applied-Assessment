@@ -39,6 +39,8 @@ def fetch_messages(total_limit=400):
 
     while len(all_msgs) < total_limit:
         resp = requests.get(url, params={"skip": skip, "limit": limit})
+        print("STATUS:", resp.status_code)
+        print("RAW TEXT:", resp.text[:500]) 
         if resp.status_code != 200:
             break
 
