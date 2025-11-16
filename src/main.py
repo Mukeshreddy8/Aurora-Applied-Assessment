@@ -1,20 +1,54 @@
-import os
+from fastapi import FastAPI
 import requests
-import numpy as np
-from fastapi import FastAPI, Query
-from openai import OpenAI
+import os
 from dotenv import load_dotenv
+from openai import OpenAI
 
+# Load local .env (ignored in Render but useful locally)
 load_dotenv()
 
 app = FastAPI()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# Create OpenAI client with explicit API key
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+print("DEBUG OPENAI KEY PREFIX:", (OPENAI_KEY[:7] if OPENAI_KEY else "None"))
+
+client = OpenAI(api_key=OPENAI_KEY)
 
 
-# ---- EMBEDDING HELPER ----
+# ------------------------------
+# Fetch messages (with pagination)
+# ------------------------------
+def fetch_messages(limit=100):
+    url = "https://november7-730026606190.europe-west1.run.app/messages"
+
+    resp = requests.get(url, params={"skip": 0, "limit": limit})
+
+    print("STATUS:", resp.status_code)
+    print("RAW TEXT:", resp.text[:300])
+
+    if resp.status_code != 200:
+        return None
+
+    try:
+        data = resp.json()
+        return data.get("items", [])
+    except:
+        return None
+
+
+# ------------------------------
+# Embed text using OpenAI
+# ------------------------------
+def embed_text(text):
+    res = client.embeddings.create(
+        model="text-embedding-3-small",
+        input=[text]
+    )
+    return res.data[0].embedding
+
+
 def embed_texts(texts):
-    """Generate embeddings using OpenAI embedding model."""
     res = client.embeddings.create(
         model="text-embedding-3-small",
         input=texts
@@ -22,95 +56,73 @@ def embed_texts(texts):
     return [item.embedding for item in res.data]
 
 
-# ---- COSINE SIMILARITY ----
-def cos_sim(a, b):
+# ------------------------------
+# Simple cosine similarity
+# ------------------------------
+def cosine_similarity(a, b):
+    import numpy as np
     a = np.array(a)
     b = np.array(b)
-    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
+    return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 
-# ---- FETCH MESSAGES ----
-def fetch_messages(total_limit=400):
-    """Fetch messages from the API using pagination."""
-    url = "https://november7-730026606190.europe-west1.run.app/messages"
-    all_msgs = []
-    skip = 0
-    limit = 100
-
-    while len(all_msgs) < total_limit:
-        resp = requests.get(url, params={"skip": skip, "limit": limit})
-        print("STATUS:", resp.status_code)
-        print("RAW TEXT:", resp.text[:500]) 
-        if resp.status_code != 200:
-            break
-
-        data = resp.json()
-        items = data.get("items", [])
-        if not items:
-            break
-
-        all_msgs.extend(items)
-        skip += limit
-
-    return all_msgs[:total_limit]
-
-
-# ---- MAIN ENDPOINT ----
+# ------------------------------
+# /ask endpoint
+# ------------------------------
 @app.get("/ask")
-def ask(question: str = Query(...)):
-    # Fetch database messages
-    messages = fetch_messages()
-
+def ask(question: str):
+    # Fetch messages
+    messages = fetch_messages(limit=300)
     if not messages:
         return {"answer": "Could not fetch messages."}
 
-    docs = [msg["message"] for msg in messages]
-    users = [msg["user_name"] for msg in messages]
+    # Prepare message list
+    contents = [m["message"] for m in messages]
+    users = [m["user_name"] for m in messages]
 
-    # Embed question + docs using OpenAI
-    q_emb = embed_texts([question])[0]
-    d_embs = embed_texts(docs)
+    # Embed query + messages
+    q_emb = embed_text(question)
+    m_embs = embed_texts(contents)
 
-    # Compute similarity for each message
-    scores = [cos_sim(q_emb, d) for d in d_embs]
-    best_idx = int(np.argmax(scores))
+    # Compute similarity
+    scores = [cosine_similarity(q_emb, emb) for emb in m_embs]
+    best_idx = scores.index(max(scores))
 
-    top_matches = sorted(
-        list(zip(scores, docs, users)),
-        key=lambda x: x[0],
-        reverse=True
-    )[:5]
+    # Build LM answer with context
+    best_message = contents[best_idx]
+    best_user = users[best_idx]
 
-    # Build a retrieval summary for GPT
-    context = "\n".join([f"- {u}: {m}" for _, m, u in top_matches])
-
-    # Ask GPT to answer using only retrieved messages
     try:
         completion = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": "Answer using ONLY the information in the retrieved messages."},
-                {"role": "user", "content": f"Question: {question}\n\nRetrieved messages:\n{context}"}
+                {
+                    "role": "system",
+                    "content": "Answer concisely based ONLY on the provided message."
+                },
+                {
+                    "role": "user",
+                    "content": f"QUESTION: {question}\n\nCONTEXT: {best_message}"
+                },
             ]
         )
 
-        final_answer = completion.choices[0].message.content
+        answer = completion.choices[0].message.content
 
         return {
-            "answer": final_answer,
-            "retrieved_messages": [
-                {"user": u, "message": m} for _, m, u in top_matches
-            ]
+            "answer": answer,
+            "retrieved_message": best_message,
+            "user": best_user
         }
 
     except Exception as e:
         return {
             "answer": "OpenAI error occurred",
             "error": str(e),
-            "retrieved_messages": [
-                {"user": u, "message": m} for _, m, u in top_matches
-            ]
+            "retrieved_message": best_message,
+            "user": best_user
         }
+
 
 
 
