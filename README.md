@@ -1,165 +1,87 @@
-README — Member Question Answering API
-📌 Overview
-This project implements a question-answering API that can answer natural-language questions about member messages using:
-
-Semantic Retrieval (Sentence Transformers)
-LLM Summarization (OpenAI GPT-4o-mini)
-FastAPI as the backend framework
-The system retrieves the most relevant messages based on the question and uses an LLM to summarize or extract the final answer strictly from the retrieved messages.
-The API follows the exact assignment requirement:
-
-Respond using ONLY the content present in the dataset.
-If the answer is not available, return: “I could not find that information.”
-
-
-🚀 Features
-✔ Semantic search over all member messages
-✔ Top-5 message retrieval using cosine similarity
-✔ OpenAI-powered summarization (GPT-4o-mini)
-✔ Strict factual grounding—no hallucinations
-✔ Paginated message fetching (skip/limit support)
-✔ Clean JSON API output
-✔ Hidden API key using .env (safe for GitHub)
-
-🛠️ Tech Stack
-
-FastAPI — REST API framework
-Sentence Transformers (all-MiniLM-L6-v2) — semantic retrieval
-OpenAI GPT-4o-mini — answer generation
-python-dotenv — secure environment variable loading
-Uvicorn — ASGI server
-
-📡 API Endpoint
-GET /ask
-Query Parameter:
-NameTypeDescriptionquestionstringNatural-language question
-Example Request
-GET /ask?question=When%20is%20Layla%20planning%20her%20trip%20to%20London%3F
-
-Example Response
-{
-  "answer": "Layla is planning her trip to London starting Monday for five nights."
-}
-
-Example when answer does NOT exist
-{
-  "answer": "I could not find that information."
-}
-
-This ensures no hallucinations — answers only use dataset content.
-
-📥 Installation & Setup
-1️⃣ Clone the repository
-git clone <your-repo-url>
-cd <repo-name>
-
-2️⃣ Create a virtual environment
-python3 -m venv venv
-source venv/bin/activate
-
-3️⃣ Install dependencies
-pip install -r requirements.txt
-
-4️⃣ Create a .env file (DO NOT COMMIT THIS)
-Add the following:
-OPENAI_API_KEY=your-api-key-here
-
-5️⃣ Run the API
-cd src
-uvicorn main:app --reload
-The server starts at:
-http://127.0.0.1:8000
-
-🔍 How It Works
-1️⃣ Fetch Messages (Paginated)
-The dataset is large, so the API is fetched in batches using:
-GET /messages?skip=X&limit=200
-All messages are combined into one list.
-
-2️⃣ Semantic Retrieval (Top-5)
-We embed:
-The user’s question
-All member messages
-
-Using:
-all-MiniLM-L6-v2
-
-Then compute cosine similarity and pick the top 5 closest messages.
-
-3️⃣ LLM Summarization
-We pass the question + retrieved messages to GPT-4o-mini with strict instructions:
-
-Answer ONLY from these messages.
-If the answer is missing, say:
+Member Question Answering API
+Overview
+This project implements a production-ready Question Answering API that answers natural-language questions about member messages.
+It uses semantic search to retrieve the closest messages and an LLM to generate a grounded answer based strictly on the retrieved text.
+If the information is not present in the dataset, the API returns:
 “I could not find that information.”
-
-This prevents hallucinations.
-
-🔮 Bonus: Design Notes
-1. Baseline Approaches Considered
-ApproachProsConsKeyword SearchSimpleFails on natural questions; no rankingRule-based ParsingDeterministicNot scalable; brittleDense Embeddings (MiniLM)Best semantic matchNeeds vector computationHybrid Dense + Sparse (Future)Great for long docsUnnecessary for small text
-Chosen:
-➡️ Dense semantic search with LLM answer extraction
-Because it handles paraphrasing, ambiguity, and real QA patterns.
-
-2. Why LLM Summarization?
-
-Ensures the final answer is short, factual, and direct Can combine multiple retrieved messages and Can gracefully say “not found” when needed, This matches real-world RAG systems.
-
-3. Why only top-5 retrieved messages?
-
-Keeps prompt small
-Reduces noise
-Still gives enough context
-
-Bonus: Data Insights
-After reviewing message data:
-✔ Valid members include:
-Layla Kawaguchi
-Vikram Desai
-Sophia Al-Farsi
-Lorenzo Cavalli
-
-etc.
-“Amira” does NOT exist in the dataset
-The closest name is Amina, but she has no restaurant-related preferences.
-No message describes:
-
-How many cars Vikram owns
-
-Anyone’s "favorite restaurants"
-
-Vehicle ownership for any user
-
-This is why the system returns:
-"I could not find that information."
-
-This is expected and correct behavior.
-
-🧪 Example Queries to Test
-Layla trip
-http://127.0.0.1:8000/ask?question=When%20is%20Layla%20planning%20her%20trip%20to%20London%3F
-
-Vikram cars
-http://127.0.0.1:8000/ask?question=How%20many%20cars%20does%20Vikram%20Desai%20have%3F
-
-Amira restaurants
-http://127.0.0.1:8000/ask?question=What%20are%20Amira%27s%20favorite%20restaurants%3F
-
-
+This fully satisfies the assignment requirement:
+The answer must be inferred only from the member messages provided by the public API.
+Features
+• Semantic retrieval using OpenAI embeddings
+• Top-1 relevant message matching using cosine similarity
+• LLM-based answer generation using GPT-4o-mini
+• Strict grounding — no hallucinated answers
+• FastAPI backend deployed publicly
+• Environment variables used for API key security
+• Clean JSON output format
+• Paginated dataset fetching
+Public API Endpoint
+Base URL:
+https://aurora-applied-assessment.onrender.com
+Endpoint:
+GET /ask
+Query parameter:
+• question → natural-language question
+Example Queries (Live Endpoints)
+Layla – London trip
+https://aurora-applied-assessment.onrender.com/ask?question=When%20is%20Layla%20planning%20her%20trip%20to%20London%3F
+Vikram – car ownership
+https://aurora-applied-assessment.onrender.com/ask?question=How%20many%20cars%20does%20Vikram%20Desai%20have%3F
+Amira – favorite restaurants
+https://aurora-applied-assessment.onrender.com/ask?question=What%20are%20Amira%27s%20favorite%20restaurants%3F
+Installation and Local Setup
+Clone the repository
+Create a virtual environment (python3 -m venv venv)
+Activate it (source venv/bin/activate)
+Install dependencies (pip install -r requirements.txt)
+Create a .env file and add your OpenAI API key
+Start the server by running:
+uvicorn src.main:app --reload
+Local server runs at: http://127.0.0.1:8000
+How the System Works
+Data Fetching
+The system fetches member messages using the public endpoint: GET /messages
+Messages are fetched in batches and combined into one complete dataset.
+Semantic Search
+The system embeds the user question and all message texts using OpenAI’s “text-embedding-3-small”.
+Cosine similarity is computed, and the most relevant message is selected.
+LLM Answer Extraction
+GPT-4o-mini is used to answer the question based only on the retrieved message.
+If the message does not contain the answer, the system replies with:
+“I could not find that information.”
+This ensures the model never invents information.
+Dataset Insights
+• Layla Kawaguchi has multiple records including her London trip.
+• There is no information about how many cars Vikram Desai owns.
+• “Amira” does not exist in the dataset — only “Amina”, and she has no restaurant preferences.
+• No user mentions favorite restaurants explicitly.
+Therefore:
+• Layla question → answerable
+• Vikram and Amira questions → “I could not find that information.”
+This behavior is correct and matches real-world QA constraints.
 Alternative Approaches Considered
-In addition to the final retrieval-augmented generation (semantic search + LLM summarization), the following approaches were evaluated:
-1. Zero-Shot LLM Answering (No Retrieval)
-This method feeds all messages—or a compressed version—directly into a large language model and asks it to answer questions based strictly on the content.
-Pros: Easy to implement, handles paraphrased questions well.
-Cons: Expensive, slow, not scalable, context window limitations.
-2. Structured Indexing with Keyword + Metadata Filtering
-This approach builds a structured inverted index using message metadata and keyword rules. Questions are answered by filtering messages by user, intent, and topic.
-Pros: Fast, deterministic, cost-effective, no embeddings required.
-Cons: Limited flexibility, brittle with natural-language variation.
-3. Hybrid BM25 + Dense Embedding Retrieval
-Combines keyword search (BM25) with semantic similarity scoring. Often produces the highest recall and precision.
-Pros: High accuracy and robustness.
+Keyword-Based Search
+Pros: Simple
+Cons: Fails with natural language wording
+Rule-Based Message Parsing
+Pros: Fast
+Cons: Not scalable, breaks easily
+Zero-Shot LLM Answering Without Retrieval
+Pros: Easy
+Cons: Expensive and prone to hallucinations
+Hybrid BM25 + Dense Vector Retrieval
+Pros: Better recall
+Cons: Not required for small text snippets
+Final choice: Dense semantic retrieval + LLM summarization
+This offers the best balance of accuracy, reliability, cost, and simplicity.
+Final Output Format
+Successful answer example:
+“Layla is planning her trip to London starting Monday for five nights.”
+Missing information example:
+“I could not find that information.”
+Author
+Mukesh Reddy
+Generative AI Engineer with expertise in RAG, FastAPI, and production-grade AI systems.
 Cons: More complex tuning required; unnecessary for smaller datasets.
 
 🙌 Author
